@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1513023914333.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "7E3EF5C3",
+    "lastKnownWriteTime" : 4294967302,
+    "last_content_update" : 1513023914333,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "F98DE145",
+        "caption" : "sale_time",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=sale_time&cache_key=F98DE145",
+        "displayedObservations" : 14042,
+        "environment" : "",
+        "object" : "sale_time",
+        "preview" : 0,
+        "totalObservations" : 14042,
+        "variables" : 3
+    },
+    "relative_order" : 10,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

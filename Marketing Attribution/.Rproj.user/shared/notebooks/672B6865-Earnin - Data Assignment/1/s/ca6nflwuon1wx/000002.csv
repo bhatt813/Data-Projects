@@ -1,0 +1,2 @@
+"0","Sale_Campaign <- Sale_Campaign[order(Sale_Campaign$days_to_sale),]"
+"0","plot(x=1:nrow(Sale_Campaign), y=Sale_Campaign$days_to_sale)"

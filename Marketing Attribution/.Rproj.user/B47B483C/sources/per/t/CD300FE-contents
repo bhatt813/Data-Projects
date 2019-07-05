@@ -1,0 +1,330 @@
+---
+title: "Earnin - Data Assignment"
+output:
+  html_document: default
+  pdf_document: default
+---
+Required Packages + Load Data into a SQLite database
+```{r}
+require(RSQLite)
+require(XLConnect)
+require(dplyr)
+require(ggplot2)
+
+location_csv <- "/Users/neilbhatt/Documents/Earnin/AssessmentData/"
+db <- dbConnect(SQLite(), dbname="Earnin.sqlite")
+dbWriteTable(conn=db, name = "attribution", value=paste0(location_csv,"attribution.csv"))
+dbWriteTable(conn=db, name = "device", value=paste0(location_csv,"device.csv"))
+dbWriteTable(conn=db, name = "item", value=paste0(location_csv,"item.csv"))
+dbWriteTable(conn=db, name = "sale", value=paste0(location_csv,"sale.csv"))
+dbWriteTable(conn=db, name = "user_device", value=paste0(location_csv,"user_device.csv"))
+dbWriteTable(conn=db, name = "user", value=paste0(location_csv,"user.csv"))
+```
+
+0. If you were about to start working with this data in a business context, what else would you want to know about it before getting started, besides the schema attached? What would you ask me if I dumped it on your desk and asked you to answer some questions based on it?
+
+•	What is the source of the data?
+•	What are the chances of misrecorded data and are you already aware of any dates or times in which the system failed to capture data points?  
+•	Business case, is there a hypothesis in mind? 
+•	Are you looking to identify time series trends? Are there any time frames to particularly analyze? 
+ 
+1. Attribution
+---------------------------------------------------------------------------------------------------------------------
+1. What can you tell me about the relationship between users and devices? Does it seem like a relationship that would happen in the real world?
+
+•	I would generally expect users to each have 1-2 devices (generally tablet & mobile) being used in a small time period?  Look at a Time period based on current user usage rates.  
+
+SQL Pull
+```{r}
+device <- dbGetQuery(db, 
+  "SELECT a.user_id, count(a.device_id) as Device, count(distinct a.device_type) as Device_Type, 
+   count(distinct operating_system) as OS
+   FROM
+    (SELECT a.user_id, a.device_id, b.device_type, b.operating_system
+    FROM user_device a
+    JOIN device b on a.device_id = b.id
+    GROUP BY 1,2,3) a
+   GROUP BY 1
+   ORDER BY 2,3")
+device$diff <- device$Device - device$Device_Type
+device$diff_OS <- device$Device - device$OS
+summary(device$Device)
+```
+Summary meets expectations, but with the mean slightly skewed and a max point of 4, I graph to identify outliers.
+```{r}
+plot(device$Device, main="Total Devices by User", xlab="User's Index", ylab="Device Count")
+```
+
+It seems unusual for users to have more than 2 devices or devices of the same type and operating system.
+```{r}
+device_sub <- subset(device, device$diff_OS>0)
+device_sub
+```
+There are 36 Users that have more than 1 device with the same operating system that should be looked into a bit further since they could be problematic or fraudulent.  
+
+Having a variable that identifies whether the device is a mobile or tablet device would be convenient and reduce the number of users to manually analyze. 
+
+The relationship between user and device is in line with expectations with 99% of users having only 1 device. 
+
+```{r}
+num_devices <- dbGetQuery(db, 
+  "SELECT a.device_id as Device, count(distinct a.user_id) as user_count 
+   FROM user_device a
+   GROUP BY 1
+   ORDER BY 2 desc")
+
+num_devices %>% group_by(user_count)%>%tally(sort = TRUE)
+
+```
+
+There are 296 devices that are attributed to 2 users, which doesn't appear to be out of the norm on face value given husband/wife or significant other combinations using a common device.  However, verifying user addresses, place of employment, or alternative fields would help mitigate risk more.  
+
+2.	What campaign was responsible for each user's finding our app? Please describe how you decided what logic to use and provide both the implementation of that logic and the answer as output.
+
+Assumption: Finding app for the first time 
+Data Pull: userid, first touch campaign date and the associated campaign
+Where clause to not include users that had a registered device before seeing a campaign.  
+First touch campaign seemed most appropriate since this is the first time that a user has discovered the app.  
+
+```{r}
+Find_All <- dbGetQuery(db, 
+"SELECT DISTINCT b.user_id, min(a.created_on) AS ft_campaign, a.campaign 
+  FROM attribution a
+  JOIN user_device b ON b.device_id = a.device_id
+  JOIN (SELECT b.user_id, min(a.created_on) AS ft_date
+        FROM attribution a
+        JOIN user_device b ON b.device_id = a.device_id
+        GROUP BY 1) c ON c.user_id = b.user_id
+WHERE a.created_on <= c.ft_date
+GROUP BY 1,3
+")
+
+Find <- dbGetQuery(db, 
+"SELECT DISTINCT b.user_id, min(a.created_on) AS ft_campaign, a.campaign 
+  FROM attribution a
+  JOIN user_device b ON b.device_id = a.device_id
+  JOIN (SELECT b.user_id, min(a.created_on) AS ft_date
+        FROM attribution a
+        JOIN user_device b ON b.device_id = a.device_id
+        GROUP BY 1) c ON c.user_id = b.user_id
+  JOIN device d ON d.id = b.device_id
+WHERE a.created_on <= c.ft_date
+AND d.created_on > c.ft_date
+GROUP BY 1,3
+")
+
+```
+There are 2,651 users in the attribution table, however 887 users had a device already registered a device before a campaign. 
+
+```{r}
+library(dplyr)
+FT_Campaigns <- Find %>% group_by(campaign)%>%tally(sort = TRUE)
+FT_Campaigns
+```
+Table outlines number of new users generated by each campaign.  
+
+    3. Which campaign was responsible for each sale? Same output as 1.2.
+
+Data Pull: 
+
+```{r}
+Sale_Campaign <- dbGetQuery(db, 
+"SELECT a.user_id, a.sales_id, a.sale_dt AS sale_date, a.amount, b.campaign, b.created_on AS campaign_dt
+FROM attribution b
+JOIN user_device d on b.device_id = d.device_id
+JOIN (SELECT a.user_id, a.created_on as sale_dt, a.id AS sales_id,a.amount 
+  FROM sale a 
+  GROUP BY 1,2,3,4) a ON a.user_id = d.user_id
+GROUP BY 1,2,3,4,5,6")
+Sale_Campaign$campaign_dt<- as.Date(Sale_Campaign$campaign_dt, '%m/%d/%y %H:%M')
+Sale_Campaign$sale_date <- as.Date(Sale_Campaign$sale_date, '%Y-%m-%d %H:%M:%OS')
+Sale_Campaign$days_to_sale <- Sale_Campaign$sale_date - Sale_Campaign$campaign_dt
+Sale_Campaign <- subset(Sale_Campaign, Sale_Campaign$days_to_sale >= 0)
+
+g1 <- Sale_Campaign %>% group_by(campaign) %>% summarise(mean = mean(days_to_sale), median = median(days_to_sale), min(days_to_sale), max(days_to_sale)) %>% arrange((mean))
+
+```
+
+```{r}
+Sale_Campaign <- Sale_Campaign[order(Sale_Campaign$days_to_sale),]
+plot(x=1:nrow(Sale_Campaign), y=Sale_Campaign$days_to_sale)
+```
+Large amount of outliers with some campaigns potentially creating sales >1200 days later
+
+```{r}
+tt <- table(Sale_Campaign$sales_id)
+Sale_Campaign_1 <- subset(Sale_Campaign, Sale_Campaign$sales_id %in% names(tt[tt == 1]))
+Boxplot <- boxplot(as.numeric(Sale_Campaign_1$days_to_sale), main="Days to Sale Box Plot", ylab="Days to Sale")
+```
+
+```{r}
+Sale_Campaign_2 <- subset(Sale_Campaign,!(Sale_Campaign$sales_id %in% Sale_Campaign_1$sales_id))
+Sale_Campaign_2 <- Sale_Campaign_2[order(Sale_Campaign_2$days_to_sale),]
+Boxplot <- boxplot(as.numeric(Sale_Campaign_2$days_to_sale), main="Days to Sale Box Plot", ylab="Days to Sale")
+```
+Identifying a reasonable time frame for which a campaign should get credit for a sale is a difficult task.  Especially for a product that is used in emergency-esq situations. However, under the assumption that the sales are effected by all campaigns that a user touches. I regorganize the data to provide path, total number of conversions, and total monetary value.  
+
+7,455 sales occured by touching only 1 campaign, 9,268 sales occured by touching more than one campaign.
+
+```{r}
+library(reshape2)
+Sale_Campaign_org <- Sale_Campaign[order(Sale_Campaign$sales_id, Sale_Campaign$campaign_dt),]
+Sale_Campaign_org <- Sale_Campaign_org %>% group_by(sales_id) %>% mutate(ida = row_number())
+Sale_Campaign_wide <- data.frame(Sale_Campaign_org$sales_id,Sale_Campaign_org$campaign, Sale_Campaign_org$ida)
+names(Sale_Campaign_wide) <- c('sales_id','campaign','id')
+Sale_Campaign_wide <- melt(Sale_Campaign_wide, id.vars = c("sales_id","id"))
+Sale_Campaign_wide <- dcast(Sale_Campaign_wide, sales_id ~ id)
+Sales <- dbGetQuery(db, "SELECT a.id AS sales_id,a.amount FROM sale a GROUP BY 1,2")
+Sales <- merge(Sale_Campaign_wide, Sales, by = 'sales_id')
+Sales[is.na(Sales)] <- 0
+Sales$path <- paste(Sales$`1`, Sales$`2`, Sales$`3`, Sales$`4`, Sales$`5`, Sales$`6`,Sales$`7`,Sales$`8`,Sales$`9`,Sales$`10`,Sales$`11`,Sales$`12`,Sales$`13`,sep=">")
+Sales_Table <- Sales %>% group_by(path)%>%summarise(amount = sum(amount))
+Sales_Table_2 <- Sales %>% group_by(path)%>%tally(sort = TRUE)
+Sales_Table <- merge(Sales_Table, Sales_Table_2, by = 'path')
+names(Sales_Table) <- c('path','total_conversion_value','total_conversions')
+```
+Sale touches a maximum of 13 campaigns and a minimum of 1 campaign.
+
+Creating attribution model
+```{r}
+library(ChannelAttribution)
+library(reshape)
+library(ggplot2)
+
+H <- heuristic_models(Sales_Table, 'path', 'total_conversions', var_value='total_conversion_value')
+M <- markov_model(Sales_Table, 'path', 'total_conversions', var_value='total_conversion_value', order = 1) 
+R <- merge(H, M, by='channel_name')
+colnames(R)[1] <- "campaign"
+R
+```
+
+```{r}
+R1 <- R[, (colnames(R)%in%c('campaign', 'first_touch_conversions', 'last_touch_conversions', 'linear_touch_conversions', 'total_conversion'))]
+colnames(R1) <- c('campaign', 'first_touch', 'last_touch', 'linear_touch', 'markov_model') 
+R1 <- melt(R1, id='campaign')
+
+ggplot(R1, aes(campaign, value, fill = variable)) +
+  geom_bar(stat='identity', position='dodge') +
+  ggtitle('TOTAL CONVERSIONS') + 
+  theme(axis.title.x = element_text(vjust = -2)) +
+  theme(axis.title.y = element_text(vjust = +2)) +
+  theme(title = element_text(size = 16)) +
+  theme(plot.title=element_text(size = 20)) +
+  ylab("")
+```
+
+
+```{r}
+R2 <- R[, (colnames(R)%in%c('campaign', 'first_touch_value', 'last_touch_value', 'linear_touch_value', 'total_conversion_value'))]
+ 
+colnames(R2) <- c('campaign', 'first_touch', 'last_touch', 'linear_touch', 'markov_model')
+ 
+R2 <- melt(R2, id='campaign')
+ 
+ggplot(R2, aes(campaign, value, fill = variable)) +
+  geom_bar(stat='identity', position='dodge') +
+  ggtitle('TOTAL VALUE') + 
+  theme(axis.title.x = element_text(vjust = -2)) +
+  theme(axis.title.y = element_text(vjust = +2)) +
+  theme(title = element_text(size = 16)) +
+  theme(plot.title=element_text(size = 20)) +
+  ylab("")
+```
+
+    4. Is there a better way that we could have collected or structured data to make our attribution analysis easier?
+
+Having the path data for each sale from the beginning would make the attribution analysis easier. Also having channel instead of campaign may provide a better breakdown as to how users are finding the app and which channels are the most effective. 
+
+---------------------------------------------------------------------------------------------------------------------
+2. When a user is on a particular product page, you have a spot where you get to show them 4 other products that we're trying to get them to interact with
+    1. How would you want to choose which product to show, regardless of this data set? In other words, what are you optimizing for in your selection of other products? What data would you want to have in order to make that choice?
+
+We are tailoring recommendations for products or services that users are more likely to want to buy or consume. Therefore, crafting a user level personalization would be the ultimate goal.  A simple content based recommendation system that provides recommendations based on what a user has already purchased would be the simplest, however more complicated system that looks at the users purchase history and aligns additional products using a more collaborative product rating system is also an option. Having purchasing history, database of product ratings, product attributes, user attributes would help answer the questions "Customers who liked this item also liked...".  
+
+    2. Assuming for a moment that this data is all that's available to you, please create a query/function/etc that will return 4 products to show.
+
+```{r error= TRUE}
+library(dplyr)
+library(reshape2)
+item <- dbGetQuery(db, "SELECT * FROM item")
+products <- dbGetQuery(db, "SELECT a.user_id,b.sale_id, b.item_id
+FROM item b
+JOIN sale a ON a.id = b.sale_id
+GROUP BY 1,2,3")
+products <- products %>% group_by(sale_id) %>% mutate(ida = row_number())
+P <- melt(products, id.vars = c("user_id","sale_id","ida"))
+P <- dcast(P, user_id+sale_id ~ ida)
+P_1 <- subset(P, select = -c(user_id,sale_id))
+txdata <- as(split(item[, "item_id"], item[, "sale_id"]), "transactions")
+```
+
+```{r error=TRUE}
+library(arules)
+library(arulesViz)
+itemFrequencyPlot(txdata,topN=20,type="absolute")
+```
+
+Top 20 items frequency table, the top 4 can be recommended as most popular items.  Or we can continue on and create rules using a support of 0.001 and confidence of 80%
+```{r error=TRUE}
+rules <- apriori(txdata, parameter = list(support=0.00015, confidence=0.5))
+inspect(head((sort(rules, by="confidence")), n=50))
+```
+
+```{r error=TRUE}
+R<-apriori(data=txdata, parameter=list(supp=0.000015,conf = 0.5,minlen=5), 
+               appearance = list(default="lhs",rhs="180"),
+               control = list(verbose=F))
+inspect(head((sort(R, by="confidence")), n=5))
+```
+Continuously changind the rhs value in the R script and we can provide the top 4 items to recommend by product added to cart or purchased. 
+
+---------------------------------------------------------------------------------------------------------------------------------------------
+3. It looks like sales have been a bit low the last couple of days of the sales data set. Is this something we should be worried about? Please use some statistics and describe what your answer means.
+```{r}
+sale_time <- dbGetQuery(db, "SELECT date(a.created_on) as sale_dt, count(a.id) AS sale_count, sum(a.amount) AS Total_Amount
+                        FROM sale a
+                        GROUP BY 1
+                        ORDER BY 1 asc")
+
+REV_plot <- ggplot(data=sale_time, aes(x=sale_dt, y=Total_Amount, group=1)) +
+  geom_point(stat="identity", fill="steelblue") + geom_line() + 
+  xlab('Date') + ylab('Total Sale Amount') +ggtitle("Revenue by Day") + geom_smooth(method = "gam",colour='red')
+REV_plot
+```
+```{r}
+sale_time_1 <- subset(sale_time, sale_time$sale_dt>='2017-02-01')
+REV_plot_1 <- ggplot(data=sale_time_1, aes(x=sale_dt, y=Total_Amount, group=1)) +
+  geom_point(stat="identity", fill="steelblue") + geom_line() + 
+  xlab('Date') + ylab('Total Sale Amount') +ggtitle("Revenue by Day") + geom_smooth(method = "gam",colour='red')
+REV_plot_1
+
+```
+
+```{r}
+library(readxl)
+Earnin_MoM <- read_excel("~/Desktop/Earnin MoM.xlsx")
+summary(Earnin_MoM$`MoM orders`)
+```
+```{r}
+summary(Earnin_MoM$`MoM total amount`)
+```
+```{r}
+summary(Earnin_MoM$`MoM average transaction`)
+```
+Looking at the last month of february with only 26 days of data there is some cause for concern since 14/26 days there was a negative growth rate on MoM Total amount.  However the overall median and mean is still positive with the data skewed left.  
+
+Looking at the last week alone:
+```{r}
+Earnin_last_week <- subset(Earnin_MoM, Earnin_MoM$date>'2017-02-19')
+summary(Earnin_last_week$`MoM orders`)
+```
+```{r}
+summary(Earnin_last_week$`MoM total amount`)
+```
+```{r}
+summary(Earnin_last_week$`MoM average transaction`)
+```
+The last week alone there is a cause for concern since all medians across orders, total amount, and average transactions are all the data is skewed right.  Given the drop off it MoM growth there might be more to look into to identify what the cause might be.  Overall however, the company has experienced exponential growth based on the original time series plot with higher highs and higher lows across time with a positive exponential trend.  
+
+
+

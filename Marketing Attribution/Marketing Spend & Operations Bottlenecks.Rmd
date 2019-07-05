@@ -1,0 +1,174 @@
+---
+title: "Unison"
+author: "Neil Bhatt"
+date: "4/24/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Connection
+
+```{r cars}
+library(RMySQL)
+drv <- dbDriver("MySQL")
+con <- dbConnect(drv, user="eric", password="eric", host="bizops-interview.cjtk5lln0bz3.us-west-2.rds.amazonaws.com",port=3306, dbname="eric")
+```
+
+## Libraries needed
+```{r}
+library(dplyr)
+library(reshape)
+library(reshape2)
+library(ggplot2)
+library(data.table)
+```
+
+###Background
+```{r}
+spend_by_campaign <- dbGetQuery(con, "SELECT Date(a.Date), a.Campaign, a.AdGroup, SUM(a.Cost) as Spend, COUNT(b.Lead_Id)
+                                FROM google a 
+                                INNER JOIN sfdc b ON a.Campaign = b.Campaign and a.AdGroup = b.AdGroup and Date(a.Date)=Date(b.Lead_CreateDate)
+                                GROUP BY 1,2,3")
+
+adgroup_ROI <- dbGetQuery(con, "SELECT a.Campaign, a.AdGroup, SUM(a.Cost), b.Estimated_Funding_Amount, AVG(b.Probability_Of_Closing) 
+                          FROM google a 
+                          INNER JOIN sfdc b ON a.Campaign = b.Campaign and a.AdGroup = b.AdGroup
+                          GROUP BY 1,2")
+adgroup_ROI$Exp_Return <- (adgroup_ROI$`AVG(b.Probability_Of_Closing)`*adgroup_ROI$Estimated_Funding_Amount*0.135 - adgroup_ROI$`SUM(a.Cost)`)/adgroup_ROI$`SUM(a.Cost)`
+adgroup_ROI <- adgroup_ROI[order(adgroup_ROI$Exp_Return),]
+plot(adgroup_ROI$Exp_Return)
+
+```
+```{r}
+adgroup_ROI_rm <- adgroup_ROI[adgroup_ROI$Exp_Return <500,]
+adgroup_ROI_rm_a <- adgroup_ROI_rm[adgroup_ROI_rm$Exp_Return >0,]
+
+plot(adgroup_ROI_rm_a$Exp_Return)
+```
+
+
+```{r}
+adgroup_ROI_outliers <- subset(adgroup_ROI, adgroup_ROI$Exp_Return <= 0)
+adgroup_ROI_outliers$Comb <- paste(adgroup_ROI_outliers$Campaign,adgroup_ROI_outliers$AdGroup)
+Poor_Adgroups <- as.data.frame(table(adgroup_ROI_outliers$Comb))
+Poor_Adgroups <- Poor_Adgroups[order(-Poor_Adgroups$Freq),]
+Poor_Adgroups
+```
+
+```{r}
+
+```
+
+```{r}
+Campaign_Adgroup_pclose <- dbGetQuery(con, "SELECT a.Campaign, a.AdGroup, COUNT(a.Lead_Id)
+                                      FROM sfdc a 
+                                      INNER JOIN google b on b.Campaign = a.Campaign and b.Adgroup = a.Adgroup
+                                      WHERE a.Probability_Of_Closing = 100
+                                      GROUP BY 1,2
+                                      ORDER BY 3 desc")
+
+closeAllConnections()
+Campaign_Adgroup_pclose
+```
+```{r}
+California <- dbGetQuery(con, "SELECT a.AdGroup, date(a.Wire_Date) - date(a.Lead_CreateDate) as diff
+                         FROM sfdc a 
+                         JOIN google b ON b.AdGroup = a.AdGroup
+                         WHERE a.campaign LIKE '%California%'
+                        AND a.Wire_Date IS NOT NULL
+                         GROUP BY 1")
+California
+```
+```{r}
+mean(California$diff)
+```
+
+
+```{r}
+Maryland <- dbGetQuery(con, "SELECT a.AdGroup, date(a.Wire_Date) - date(a.Lead_CreateDate) as diff
+                         FROM sfdc a 
+                         JOIN google b ON b.AdGroup = a.AdGroup
+                         WHERE a.campaign LIKE '%Maryland%'
+                        AND a.Wire_Date IS NOT NULL
+                         GROUP BY 1")
+Maryland
+```
+
+```{r}
+NewYork <- dbGetQuery(con, "SELECT a.AdGroup, date(a.Wire_Date) - date(a.Lead_CreateDate) as diff
+                         FROM sfdc a 
+                         JOIN google b ON b.AdGroup = a.AdGroup
+                         WHERE a.campaign LIKE '%NewYork%'
+                        AND a.Wire_Date IS NOT NULL
+                         GROUP BY 1")
+NewYork
+```
+
+```{r}
+Arizona <- dbGetQuery(con, "SELECT a.AdGroup, date(a.Wire_Date) - date(a.Lead_CreateDate) as diff
+                         FROM sfdc a 
+                         JOIN google b ON b.AdGroup = a.AdGroup
+                         WHERE a.campaign LIKE '%Arizona%'
+                        AND a.Wire_Date IS NOT NULL
+                         GROUP BY 1")
+Arizona
+```
+```{r}
+Brand <- dbGetQuery(con, "SELECT a.AdGroup, date(a.Wire_Date) - date(a.Lead_CreateDate) as diff
+                         FROM sfdc a 
+                         JOIN google b ON b.AdGroup = a.AdGroup
+                         WHERE a.campaign LIKE '%Brand%'
+                        AND a.Wire_Date IS NOT NULL
+                         GROUP BY 1")
+Brand
+```
+
+```{r}
+ROI_byDate <- dbGetQuery(con, "SELECT dayofweek(a.date), SUM(a.Cost), COUNT(b.Lead_CreateDate), AVG(b.Probability_Of_Closing)*SUM(b.Estimated_Funding_Amount)*0.135 AS Expected_REV
+                         FROM google a INNER JOIN sfdc b ON a.Campaign = b.Campaign and date(a.date)=date(b.Lead_CreateDate)
+WHERE b.Probability_Of_Closing > 0
+GROUP BY 1")
+ROI_byDate$ROI <- (ROI_byDate$Expected_REV - ROI_byDate$`SUM(a.Cost)`)/ROI_byDate$`SUM(a.Cost)`
+ROI_byDate <- ROI_byDate[order(-ROI_byDate$ROI),]
+plot(ROI_byDate$ROI)
+```
+```{r}
+ROI_byDate$CPL <- ROI_byDate$`SUM(a.Cost)`/ROI_byDate$`COUNT(b.Lead_CreateDate)`
+plot(ROI_byDate$CPL)
+```
+Highest CPL on Thursdays and Sundays that are out of line with Expected Return, dayparting on those days would be most useful
+```{r}
+Prob <- dbGetQuery(con, "SELECT a.Probability_Of_Closing, COUNT(a.Lead_Id)
+                   FROM sfdc a 
+                   JOIN google b ON a.Campaign = b.Campaign and a.AdGroup = b.AdGroup and date(b.date)=date(a.Lead_CreateDate)
+                   GROUP BY 1")
+ggplot(subset(Prob), aes(x=as.factor(Prob$Probability_Of_Closing),y=Prob$`COUNT(a.Lead_Id)`)) + geom_bar(stat = "sum")
+
+
+```
+
+```{r}
+Prob_A <- Prob[Prob$Probability_Of_Closing >0,]
+ggplot(Prob_A, aes(x=as.factor(Prob_A$Probability_Of_Closing),y=Prob_A$`COUNT(a.Lead_Id)`)) + geom_bar(stat = "sum")
+
+```
+
+
+
+
+
+##Outlier Removal Function
+```{r}
+outlierReplace = function(dataframe, cols, rows, newValue = NA) {
+    if (any(rows)) {
+        set(dataframe, rows, cols, newValue)
+    }
+}
+```
+##Spend and Return by State
+##Count of Probability of Completion and Users
+##Average ROAS per campaign
+##

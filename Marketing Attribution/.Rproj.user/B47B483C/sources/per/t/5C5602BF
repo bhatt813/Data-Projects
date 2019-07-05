@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1513025394083.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "5C5602BF",
+    "lastKnownWriteTime" : 4294967302,
+    "last_content_update" : 1513025394083,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "1560DD1C",
+        "caption" : "Earnin_MoM",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=Earnin_MoM&cache_key=1560DD1C",
+        "displayedObservations" : 26,
+        "environment" : "",
+        "object" : "Earnin_MoM",
+        "preview" : 0,
+        "totalObservations" : 26,
+        "variables" : 8
+    },
+    "relative_order" : 12,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

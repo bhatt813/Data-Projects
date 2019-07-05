@@ -1,0 +1,11 @@
+"0","library(reshape2)
+"
+"2","
+Attaching package: ‘reshape2’
+
+"
+"2","The following objects are masked from ‘package:reshape’:
+
+    colsplit, melt, recast
+
+"

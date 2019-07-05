@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1513023520522.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "21795E34",
+    "lastKnownWriteTime" : 6,
+    "last_content_update" : 1513023520522,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "14EF9C91",
+        "caption" : "Sale_Campaign",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=Sale_Campaign&cache_key=14EF9C91",
+        "displayedObservations" : 16723,
+        "environment" : "",
+        "object" : "Sale_Campaign",
+        "preview" : 0,
+        "totalObservations" : 16723,
+        "variables" : 7
+    },
+    "relative_order" : 9,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

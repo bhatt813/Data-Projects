@@ -1,0 +1,3 @@
+"0","tt <- table(Sale_Campaign$sales_id)"
+"0","Sale_Campaign_1 <- subset(Sale_Campaign, Sale_Campaign$sales_id %in% names(tt[tt == 1]))"
+"0","Boxplot <- boxplot(as.numeric(Sale_Campaign_1$days_to_sale), main=""Days to Sale Box Plot"", ylab=""Days to Sale"")"
